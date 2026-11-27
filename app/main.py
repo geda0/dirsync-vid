@@ -46,7 +46,7 @@ th, td { padding:7px 10px; border-bottom:1px solid #e4e7ec; text-align:left; }
 </main>
 <script>
 const $ = id => document.getElementById(id);
-let page = 0, total = 0, running = false;
+let page = 0, total = 0, lastRun = null;
 
 async function users() {
   const d = await (await fetch(`/api/users?q=${encodeURIComponent($("q").value)}&page=${page}`)).json();
@@ -65,8 +65,7 @@ async function poll() {
   $("label").textContent = s.running ? `${s.kind} sync · Page ${s.page} / ${s.total_pages} · ${s.users_seen} users` : "Idle";
   const r = s.last_run;
   if (r) $("last").textContent = `Last sync: ${r.kind} · started ${r.started_at} · finished ${r.finished_at} · cursor saved ${r.cursor_saved} · users seen ${r.users_seen}`;
-  if (running && !s.running) users();
-  running = s.running;
+  if (r && r.id !== lastRun) { lastRun = r.id; users(); }
 }
 
 async function start(kind) {

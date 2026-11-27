@@ -162,4 +162,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     store = Store(RealClock(), args.skew, args.lag)
     store.load(seed_users(args.users))
-    uvicorn.run(create_provider_app(store, latency_ms=args.latency_ms), port=9000, log_level="warning")
+    uvicorn.run(create_provider_app(store, latency_ms=args.latency_ms), port=9000, log_level="warning", date_header=False)
