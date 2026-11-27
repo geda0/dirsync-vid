@@ -44,31 +44,24 @@ def seed_users(count, seed=42):
 
 
 class Store:
-    def __init__(self, clock, clock_skew_s=0.0, search_lag_s=0.0, seed=0):
+    def __init__(self, clock, clock_skew_s=0.0):
         self.clock = clock
         self.clock_skew_s = clock_skew_s
-        self.search_lag_s = search_lag_s
-        self.rng = random.Random(seed)
         self.lock = threading.RLock()
         self.ids = []
-        self.versions = {}
+        self.users = {}
 
     def provider_now(self):
         return (self.clock.now() - timedelta(seconds=self.clock_skew_s)).replace(microsecond=0)
 
-    def _write(self, user, index_delay=None, stamp=True):
+    def _write(self, user, stamp=True):
         with self.lock:
             user = copy.deepcopy(user)
-            now = self.provider_now()
             if stamp:
-                user["lastUpdated"] = fmt(now)
-            if index_delay is None:
-                index_delay = self.rng.uniform(0, self.search_lag_s) if self.search_lag_s else 0
-            visible_at = fmt(now + timedelta(seconds=index_delay)) if stamp else user["lastUpdated"]
-            if user["id"] not in self.versions:
+                user["lastUpdated"] = fmt(self.provider_now())
+            if user["id"] not in self.users:
                 bisect.insort(self.ids, user["id"])
-                self.versions[user["id"]] = []
-            self.versions[user["id"]].append((visible_at, user))
+            self.users[user["id"]] = user
             return copy.deepcopy(user)
 
     def load(self, users):
@@ -77,48 +70,31 @@ class Store:
 
     def current(self, user_id):
         with self.lock:
-            return copy.deepcopy(self.versions[user_id][-1][1])
+            return copy.deepcopy(self.users[user_id])
 
-    def update(self, user_id, index_delay=None, **profile):
+    def update(self, user_id, **profile):
         user = self.current(user_id)
         user["profile"].update(profile)
-        return self._write(user, index_delay)
+        return self._write(user)
 
-    def set_status(self, user_id, status, index_delay=None):
+    def set_status(self, user_id, status):
         user = self.current(user_id)
         user["status"] = status
-        return self._write(user, index_delay)
+        return self._write(user)
 
-    def create(self, index_delay=None, **profile):
+    def create(self, **profile):
         user = make_user(len(self.ids) + 1, profile.pop("firstName"), profile.pop("lastName"), "", "")
         user["profile"].update(profile)
-        return self._write(user, index_delay)
+        return self._write(user)
 
     def touch_all(self):
         for user_id in list(self.ids):
             self._write(self.current(user_id))
         return len(self.ids)
 
-    def list_page(self, after, limit, op=None, bound=None):
+    def list_page(self, after, limit, since=None):
         with self.lock:
-            start = bisect.bisect_right(self.ids, after) if after else 0
-            if op is None:
-                ids = self.ids[start:start + limit]
-                return ([copy.deepcopy(self.versions[i][-1][1]) for i in ids],
-                        start + limit < len(self.ids), len(self.ids))
-
-            now = fmt(self.provider_now())
-            test = {"gt": bound.__lt__, "ge": bound.__le__, "lt": bound.__gt__, "eq": bound.__eq__}[op]
-            page, more, total = [], False, 0
-            for user_id in self.ids[start:]:
-                visible = next((u for at, u in reversed(self.versions[user_id]) if at <= now), None)
-                if visible is None or not test(visible["lastUpdated"]):
-                    continue
-                total += 1
-                if len(page) < limit:
-                    page.append(copy.deepcopy(visible))
-                else:
-                    more = True
-                    if after:
-                        break
-            return page, more, (total if after is None else -1)
+            matching = [i for i in self.ids if since is None or self.users[i]["lastUpdated"] > since]
+            rest = [i for i in matching if i > after] if after else matching
+            page = [copy.deepcopy(self.users[i]) for i in rest[:limit]]
+            return page, len(rest) > limit, len(matching)

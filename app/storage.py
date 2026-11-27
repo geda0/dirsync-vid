@@ -110,9 +110,6 @@ class Storage:
         return [r["action"] for r in self.query(
             "SELECT action FROM audit_log WHERE external_id = ? ORDER BY id", (external_id,))]
 
-    def audit_count(self):
-        return self.query("SELECT count(*) AS n FROM audit_log")[0]["n"]
-
     def record_run(self, kind, started_at, finished_at, cursor_saved, pages, users_seen):
         self.execute(
             "INSERT INTO sync_runs (kind, started_at, finished_at, cursor_saved, pages, users_seen) "

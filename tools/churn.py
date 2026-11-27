@@ -33,16 +33,14 @@ def main():
     parser.add_argument("--changes-per-cycle", type=int, default=60)
     parser.add_argument("--bulk-cycles", default="3,8")
     parser.add_argument("--skew", type=float, default=0.0)
-    parser.add_argument("--lag", type=float, default=0.0)
     parser.add_argument("--mode", choices=["delta", "full"], default="delta")
     parser.add_argument("--budget", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=7)
-    parser.add_argument("--out")
     args = parser.parse_args()
 
     rng = random.Random(args.seed)
     clock = FakeClock(START)
-    store = Store(clock, args.skew, args.lag, args.seed)
+    store = Store(clock, args.skew)
     store.load(seed_users(args.users, args.seed))
     app = create_provider_app(store, sim_latency_s=0.1)
     storage = Storage()
@@ -50,10 +48,8 @@ def main():
     run = sync.full_reconcile if args.mode == "full" else sync.delta_sync
     bulk = {int(c) for c in args.bulk_cycles.split(",") if c}
     ids = list(store.ids)
-    pending = {}
-    staleness = []
 
-    def mutate(cycle):
+    def mutate():
         clock.advance(rng.uniform(1, 3))
         user_id = rng.choice(ids)
         if rng.random() < 0.2:
@@ -61,14 +57,6 @@ def main():
             store.set_status(user_id, "DEACTIVATED" if active else "ACTIVE")
         else:
             store.update(user_id, department=rng.choice(DEPARTMENTS), title=rng.choice(TITLES))
-        pending.setdefault(user_id, cycle)
-
-    def resolve(cycle):
-        for user_id, since in list(pending.items()):
-            local = storage.get(user_id)
-            if local and directory_view(local) == provider_view(store.current(user_id)):
-                staleness.append(cycle - since)
-                del pending[user_id]
 
     sync.full_reconcile()
     for cycle in range(1, args.cycles + 1):
@@ -76,34 +64,26 @@ def main():
         if cycle in bulk:
             store.touch_all()
         for _ in range(args.changes_per_cycle // 2):
-            mutate(cycle)
+            mutate()
         pages = len(ids) // 200 if args.mode == "full" or cycle in bulk else 2
         for _ in range(args.changes_per_cycle - args.changes_per_cycle // 2):
-            app.state.hooks.after_page(rng.randint(1, max(2, pages)), lambda s, c=cycle: mutate(c))
+            app.state.hooks.after_page(rng.randint(1, max(2, pages)), lambda s: mutate())
         run()
         app.state.hooks.clear()
-        resolve(cycle)
     clock.advance(CYCLE_S)
     run()
-    resolve(args.cycles + 1)
 
     local = storage.all()
     lost = [i for i in ids if i not in local or directory_view(local[i]) != provider_view(store.current(i))]
     lost_deactivations = [i for i in lost if store.current(i)["status"] == "DEACTIVATED"]
     per_hour = round(len(app.state.request_times) * 3600 / ((args.cycles + 1) * CYCLE_S))
     lines = [
-        f"mode={args.mode} users={args.users} cycles={args.cycles} skew={args.skew:g}s lag={args.lag:g}s seed={args.seed}",
+        f"mode={args.mode} users={args.users} cycles={args.cycles} skew={args.skew:g}s seed={args.seed}",
         f"lost_changes:            {len(lost)}",
         f"lost_deactivations:      {len(lost_deactivations)}",
-        f"worst_staleness_cycles:  {'never synced' if pending else max(staleness, default=0)}",
         f"requests_per_hour:       {per_hour} (budget {args.budget}: {'OVER' if per_hour > args.budget else 'ok'})",
-        f"audit_rows_written:      {storage.audit_count()}",
     ]
-    text = "\n".join(lines)
-    print(text)
-    if args.out:
-        with open(args.out, "w") as f:
-            f.write(text + "\n")
+    print("\n".join(lines))
 
 
 if __name__ == "__main__":

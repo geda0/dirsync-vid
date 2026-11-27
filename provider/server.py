@@ -101,16 +101,15 @@ def create_provider_app(store, latency_ms=0, sim_latency_s=0.0, page_size_max=20
     @app.get("/users")
     def list_users(request: Request, limit: int = 200, after: str | None = None, filter: str | None = None):
         headers = on_request()
-        op = bound = None
+        since = None
         if filter:
-            field, op, bound = filter.split(" ", 2)
-            if field != "lastUpdated" or op not in {"gt", "ge", "lt", "eq"}:
+            field, op, value = filter.split(" ", 2)
+            if field != "lastUpdated" or op != "gt":
                 raise HTTPException(400, "Invalid search criteria")
-            bound = bound.strip('"')
+            since = value.strip('"')
         limit = min(limit, page_size_max)
-        users, more, total = store.list_page(after, limit, op, bound)
-        if total >= 0:
-            headers["X-Total-Count"] = str(total)
+        users, more, total = store.list_page(after, limit, since)
+        headers["X-Total-Count"] = str(total)
         if more:
             params = urlencode({"limit": limit, "after": users[-1]["id"], **({"filter": filter} if filter else {})})
             headers["Link"] = f'<{str(request.base_url).rstrip("/")}/users?{params}>; rel="next"'
@@ -158,8 +157,7 @@ if __name__ == "__main__":
     parser.add_argument("--users", type=int, default=6000)
     parser.add_argument("--latency-ms", type=int, default=1000)
     parser.add_argument("--skew", type=float, default=0.0)
-    parser.add_argument("--lag", type=float, default=0.0)
     args = parser.parse_args()
-    store = Store(RealClock(), args.skew, args.lag)
+    store = Store(RealClock(), args.skew)
     store.load(seed_users(args.users))
     uvicorn.run(create_provider_app(store, latency_ms=args.latency_ms), port=9000, log_level="warning", date_header=False)

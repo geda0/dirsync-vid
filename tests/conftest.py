@@ -32,9 +32,9 @@ class Provider:
         self.store = app.state.store
         self.clock = clock
 
-    def update(self, user_id, advance=1, index_delay=None, **profile):
+    def update(self, user_id, advance=1, **profile):
         self.clock.advance(advance)
-        return self.store.update(user_id, index_delay, **profile)
+        return self.store.update(user_id, **profile)
 
     def deactivate(self, user_id, advance=1):
         self.clock.advance(advance)
