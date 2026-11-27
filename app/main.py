@@ -135,5 +135,5 @@ def create_app(sync):
 
 def app_factory():
     http = httpx.Client(base_url=os.environ.get("PROVIDER_URL", "http://localhost:9000"), timeout=30)
-    storage = Storage(os.environ.get("DB_PATH", "directory.db"))
+    storage = Storage(os.environ.get("DB_PATH", ":memory:"))
     return create_app(DirectorySync(http, storage, SystemClock()))
